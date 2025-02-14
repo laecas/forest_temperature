@@ -1,3 +1,5 @@
+source("./R/start_project.R")
+source("./R/create_reference_grid.R")
 source("./R/handle_aoi.R")
 source("./R/handle_lulc.R")
 source("./R/handle_elevation.R")
@@ -8,6 +10,10 @@ source("./R/run_statistics.R")
 source("./R/run_validation.R")
 source("./R/run_exploration.R")
 
+# START PROJECT
+start_project()
+
+create_reference_grid()
 
 # DOWNLOAD DATA
 
@@ -56,6 +62,7 @@ process_precipitation()
 analysis_merge_data()
 
 analysis_merge_tif()
+
 
 # RUN EXPLORATORY ANALYSIS
 
@@ -121,6 +128,7 @@ describe_tempspat(
   vars_lab = "Elevation",
   vars = c("elevation")
 )
+
 
 # RUN STATISTICAL ANALYSIS
 
