@@ -1,37 +1,37 @@
+# -----------------------------------------------------------------------------
+# This function downloads all mapbiomas land cover data
+# (for the years provided).
+# It also subsets the downloadeds data for the region of interest
+# (must be the same as the region provided to create the reference grid).
 download_mapbiomas <-
   function(
-    year = c(2001:2020),
-    area_of_interest = "vale_paraiba"
+    # Years of data to be downloaded (should be a vector of integers)
+    years = c(2001L:2020L),
+    # The name of a Geopackage file located in the data directory
+    # (you must put the file there)
+    area_of_interest = "sp"
   ) {
-
     # Load area of interest
-    aoi <-
-      sf::read_sf(
-        dsn = glue::glue(
-          "./data/{area_of_interest}.gpkg"
-        )
-      )
+    aoi <- sf::read_sf(dsn = glue::glue("./data/{area_of_interest}.gpkg"))
 
     # Get bounding box of interest
     bbox <- aoi |>
-      sf::st_transform("EPSG:4326") |>
+      sf::st_transform(crs = "EPSG:4326") |>
       sf::st_bbox()
 
+    # Download and subset data for each year
     purrr::walk(
-      .x = year,
+      .x = years,
       \(y) {
-
         # Create temporary directory
         file_dir <- tempdir()
-        fs::dir_create(glue::glue("{file_dir}/raster"))
+        fs::dir_create(path = glue::glue("{file_dir}/raster"))
         file_dir <- glue::glue("{file_dir}/raster")
 
         # Set path for downloaded data
-        file_path <-
-          glue::glue(
-            "{file_dir}/mapbiomas_{y}.tif"
-          )
+        file_path <- glue::glue("{file_dir}/mapbiomas_{y}.tif")
 
+        # This is the url for the direct download of mapbiomas data
         img_url <-
           glue::glue(
             "https://storage.googleapis.com/mapbiomas-public/initiatives/",
@@ -39,32 +39,25 @@ download_mapbiomas <-
           )
 
         # Download data ----
-        # Create curl handle
+        # Set download options
         h <- curl::new_handle()
-
-        curl::handle_setopt(
-          h,
-          ssl_verifypeer = FALSE
-        )
+        curl::handle_setopt(handle = h, ssl_verifypeer = FALSE)
 
         # Download data to temporary directory
-        curl::curl_download(
-          url = img_url,
-          destfile = file_path
-        )
+        curl::curl_download(url = img_url, destfile = file_path)
 
-        # Load image
-        img <- stars::read_stars(file_path)
+        # Load downloaded image
+        img <- stars::read_stars(.x = file_path)
 
         # Transform area of interest bbox to mapbiomas CRS
         stars_bbox <- bbox |>
           sf::st_as_sfc() |>
-          sf::st_transform(sf::st_crs(img)) |>
+          sf::st_transform(crs = sf::st_crs(img)) |>
           sf::st_bbox()
 
-        # Crop mapbiomas raster to area of interest
+        # Crop mapbiomas raster to area of interest bounding box
         img <- img |>
-          sf::st_crop(stars_bbox)
+          sf::st_crop(y = stars_bbox)
 
         # Save mapbiomas raster to final destination
         stars::write_stars(
@@ -76,38 +69,54 @@ download_mapbiomas <-
           progress = FALSE
         )
 
-        unlink(file_dir, recursive = TRUE)
-
+        unlink(x = file_dir, recursive = TRUE)
       }
     )
 
     return(invisible(NULL))
-
   }
 
+# -----------------------------------------------------------------------------
+# This function processes the downloaded mapbiomas data.
+# It calculates the proportion of each land use of interest in the area of
+# each cell of the bigger reference grid.
 process_mapbiomas <-
   function(
-    area_of_interest = "vale_paraiba",
-    years = c(2001:2020),
+    # Years of data to be processed (should be a vector of integers)
+    years = c(2001L:2020L),
+    # The name of a Geopackage file located in the data directory
+    # (you must put the file there)
+    area_of_interest = "sp",
+    # A scale factor to downsample the mapbiomas files
+    # (the downsample method is the mode)
     scale_factor = 1
+    # So if the mapbiomas have spatial resolution of 30 meters,
+    # and you supply a `scale_factor` of 3, it will perform the mode of a 3x3
+    # window of pixels, generating a new pixel of 90 meters.
+    # The scale factor should also make the mapbiomas data resolution close to
+    # the smaller reference grid.
   ) {
-
     # Load area of interest
     aoi <-
-      sf::read_sf(
-        dsn = glue::glue(
-          "./data/{area_of_interest}.gpkg"
-        )
+      sf::read_sf(dsn = glue::glue("./data/{area_of_interest}.gpkg")) |>
+      sf::st_transform(sf::st_crs(readr::read_file("./data/project_crs.txt")))
+
+    ## Prepare to read and process data ---------------------------------------
+
+    # Crop mapbiomas proxy raster to aoi bounding box
+    # Get mapbiomas file proxy
+    raster_meta <-
+      stars::read_stars(
+        .x = fs::dir_ls(path = "./data/raw/lulc/")[1],
+        proxy = TRUE
       )
 
-    # Crop mapbiomas proxy raster to campinas bounding box
-    raster_meta <-
-      stars::read_stars(fs::dir_ls("./data/raw/lulc/")[1], proxy = TRUE)
+    # Get the dimensions of mapbiomas raster proxy
+    raster_dim <- stars::st_dimensions(.x = raster_meta)
 
-    # Get the dimensions of the cropped mapbiomas raster
-    raster_dim <- stars::st_dimensions(raster_meta)
-
-    # make a list with rasterio options for reading raster
+    # Make a list with rasterio options for reading raster
+    # This will use the scale_factor argument to downscale the raster data
+    # in the reading process
     rasterio <-
       list(
         nXOff = raster_dim$x$from,
@@ -116,113 +125,155 @@ process_mapbiomas <-
         nYSize = raster_dim$y$to - raster_dim$y$from,
         nBufXSize = (raster_dim$x$to - raster_dim$x$from) / scale_factor,
         nBufYSize = (raster_dim$y$to - raster_dim$y$from) / scale_factor,
-        resample = "mode"
+        resample = "mode" # Method of downscaling
       )
 
-    reference_small <-
-      stars::read_stars(
-        "./data/reference_small.tif"
-      )
+    # Read reference grids
+    reference_small <- stars::read_stars(.x = "./data/reference_small.tif")
+    reference_big <- stars::read_stars(.x = "./data/reference_big.tif")
 
-    reference_big <-
-      stars::read_stars(
-        "./data/reference_big.tif"
-      )
-
+    # This creates a new factor to transform the loaded mapbiomas data into
+    # the same spatial resolution of the bigger reference grid
     downsample_factor <-
-      stars::st_res(reference_big)[[1]] /
-      stars::st_res(reference_small)[[1]] - 1
+      stars::st_res(x = reference_big)[[1]] /
+      stars::st_res(x = reference_small)[[1]] -
+      1 # Important to subtract by 1 (read the `stars::st_downsample` docs)
 
+    # This creates a new factor to calculate the proportion of each land use
+    # inside the downsampled cells
     proportion_factor <-
-      (
-        stars::st_res(reference_big)[[1]] /
-        stars::st_res(reference_small)[[1]]
-      ) ^ 2
+      (stars::st_res(x = reference_big)[[1]] /
+        stars::st_res(x = reference_small)[[1]])^2
 
+    ## Read and process mapbiomas data ----------------------------------------
+
+    # Process data for each year
     lulc_stars_list <-
       purrr::map(
         .x = years,
         .f = \(y) {
-
           # Read subset of mapbiomas raster using rasterio
+          # Warp the mapbiomas data to the smaller reference grid
           lulc_stars <-
             stars::read_stars(
               .x = glue::glue("./data/raw/lulc/mapbiomas_{y}.tif"),
               RasterIO = rasterio,
               NA_value = 0,
-              proxy = FALSE
+              proxy = TRUE
             ) |>
-            setNames("lulc") |>
-            stars::st_warp(dest = reference_small)
+            stars::st_warp(
+              dest = reference_small,
+              use_gdal = TRUE,
+              method = "near",
+              no_data_value = 0
+            ) |>
+            stars::st_as_stars() |>
+            rlang::set_names(nm = "lulc")
 
-          lulc_stars_agg <-
+          # Reclassify values of land use of interest to 1
+          lulc_stars[["urban"]] <-
+            ifelse(
+              test = lulc_stars[["lulc"]] == 24,
+              yes = 1,
+              no = 0
+            )
+          lulc_stars[["forest"]] <-
+            ifelse(
+              test = lulc_stars[["lulc"]] == 3,
+              yes = 1,
+              no = 0
+            )
+          lulc_stars[["agriculture"]] <-
+            ifelse(
+              test = lulc_stars[["lulc"]] %in%
+                c(39, 20, 40, 62, 41, 46, 47, 35, 48),
+              yes = 1,
+              no = 0
+            )
+          lulc_stars[["pasture"]] <-
+            ifelse(
+              test = lulc_stars[["lulc"]] %in% c(15),
+              yes = 1,
+              no = 0
+            )
+          lulc_stars[["mosaic"]] <-
+            ifelse(
+              test = lulc_stars[["lulc"]] %in% c(21),
+              yes = 1,
+              no = 0
+            )
+
+          # Downsample loaded mapbiomas data to match the bigger reference grid
+          lulc_stars <-
             lulc_stars |>
-            dplyr::mutate(
-              urban = dplyr::if_else(lulc == 24, 1, 0),
-              forest = dplyr::if_else(lulc == 3, 1, 0),
-              agriculture = dplyr::if_else(
-                lulc %in% c(39, 20, 40, 62, 41), 1, 0
-              )
-            ) |>
             dplyr::select(!lulc) |>
             stars::st_downsample(
-              downsample_factor,
+              n = downsample_factor,
+              # It sums the amount of 1 values inside the bigger
+              # reference grid cells
               FUN = sum,
               na.rm = TRUE
             ) |>
             dplyr::mutate(
+              # By applying the proportion_factor, we transform the data to a
+              # proportion (0 to 1)
               urban = urban / proportion_factor,
               forest = forest / proportion_factor,
-              agriculture = agriculture / proportion_factor
+              agriculture = agriculture / proportion_factor,
+              pasture = pasture / proportion_factor,
+              mosaic = mosaic / proportion_factor
             )
 
-          lulc_stars_agg <-
-            lulc_stars_agg |>
+          # Redimension the raster so that we have a time dimension
+          lulc_stars <- lulc_stars |>
             stars::st_redimension(
               new_dims = stars::st_dimensions(
-                x = stars::st_get_dimension_values(lulc_stars_agg, "x"),
-                y = stars::st_get_dimension_values(lulc_stars_agg, "y"),
+                x = stars::st_get_dimension_values(lulc_stars, "x"),
+                y = stars::st_get_dimension_values(lulc_stars, "y"),
                 time = lubridate::ymd(glue::glue("{y}-01-01"))
               )
             )
 
+          gc(verbose = FALSE)
+
+          return(lulc_stars)
         }
       )
 
+    # Merge all mapbiomas processed data along the time dimension
     lulc_stars_cube <-
       purrr::reduce(
         .x = lulc_stars_list,
         .f = c,
-        along = 3
+        along = 3 # This is the time dimension
       ) |>
-      sf::st_crop(aoi, crop = FALSE)
+      sf::st_crop(
+        # Turn to NA all values that falls outside the area of interest (AOI)
+        y = aoi,
+        crop = FALSE
+      )
 
+    # Write the results
     stars::write_mdim(
       x = lulc_stars_cube,
       filename = "./data/processed/lulc_mapbiomas.nc"
     )
 
     return(invisible(NULL))
-
   }
 
+# -----------------------------------------------------------------------------
+# This function downloads the legend of the mapobiomas data
 download_mapbiomas_legenda <-
   function() {
-
     # Set working directory
     wdir <- here::here()
 
-    # Set municipality option to title case
-    muni <- stringr::str_to_title(muni)
-
-    base_dir <-
-      glue::glue(
-        "{wdir}/dados"
-      )
+    base_dir <- glue::glue("{wdir}/data")
 
     # Create temporary directory
     file_dir <- tempdir()
-    fs::dir_create(glue::glue("{tempdir()}/legenda"))
+    fs::dir_create(path = glue::glue("{tempdir()}/legenda"))
     file_dir <- glue::glue("{tempdir()}/legenda")
 
     # Crate path for downloaded data
@@ -234,17 +285,13 @@ download_mapbiomas_legenda <-
     data_url <-
       glue::glue(
         "https://brasil.mapbiomas.org/wp-content/uploads/sites/",
-        "4/2023/09/Codigos-da-legenda-colecao-9-csv.zip"
+        "4/2024/08/Codigos-da-legenda-colecao-9.zip"
       )
 
     # Download data ----
-    # Create curl handle
+    # Set download options
     h <- curl::new_handle()
-
-    curl::handle_setopt(
-      h,
-      ssl_verifypeer = FALSE
-    )
+    curl::handle_setopt(handle = h, ssl_verifypeer = FALSE)
 
     # Download data to temporary dir
     curl::curl_download(
@@ -255,7 +302,6 @@ download_mapbiomas_legenda <-
 
     # Extract compressed files
     if (stringr::str_detect(file_path, ".zip")) {
-
       utils::unzip(
         zipfile = file_path,
         exdir = glue::glue("{file_dir}/")
@@ -268,15 +314,19 @@ download_mapbiomas_legenda <-
           recurse = TRUE,
           regexp = "Codigos-da-legenda-colecao-9.csv"
         )
-
     }
 
     legend_data <-
-      readr::read_delim(file_path, delim = ";", show_col_types = FALSE) |>
+      readr::read_delim(
+        file = file_path,
+        delim = "\t",
+        show_col_types = FALSE
+      ) |>
       janitor::clean_names()
 
-    readr::write_csv(legend_data, dest_path)
+    readr::write_csv(x = legend_data, file = dest_path)
 
     return(invisible(NULL))
-
   }
+
+# -----------------------------------------------------------------------------

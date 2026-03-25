@@ -1,6 +1,7 @@
+# -----------------------------------------------------------------------------
+# Compare GSHTD temperature estimates with meteorological station observations
 temperature_scatterplot <-
   function() {
-
     validation_data <-
       readr::read_csv("./data/validation/validation_long_s.csv") |>
       dplyr::filter(
@@ -13,7 +14,7 @@ temperature_scatterplot <-
       dplyr::summarise(mae = mean(abs(difference)), .by = "var")
 
     # Calculate bias and pbias
-    bias <-  validation_data |>
+    bias <- validation_data |>
       dplyr::mutate(difference = model - ncdc) |>
       dplyr::summarise(
         bias = mean(difference),
@@ -81,12 +82,12 @@ temperature_scatterplot <-
     )
 
     return(validation_plot)
-
   }
 
+# -----------------------------------------------------------------------------
+# Compare GSHTD temperature estimates with meteorological station observations
 temperature_timeseries <-
   function() {
-
     validation_data <-
       readr::read_csv("./data/validation/validation_long.csv") |>
       dplyr::filter(
@@ -130,13 +131,19 @@ temperature_timeseries <-
       ggplot2::ggplot() +
       ggplot2::geom_line(
         mapping = ggplot2::aes(
-          x = year, y = value, color = var, linetype = source
+          x = year,
+          y = value,
+          color = var,
+          linetype = source
         ),
         size = 1.1
       ) +
       ggplot2::geom_point(
         mapping = ggplot2::aes(
-          x = year, y = value, color = var, shape = source
+          x = year,
+          y = value,
+          color = var,
+          shape = source
         ),
         size = 2,
         fill = "#FFFFFF"
@@ -151,7 +158,10 @@ temperature_timeseries <-
       ggplot2::scale_x_date(date_breaks = "2 years", date_labels = "%Y") +
       ggplot2::scale_shape_manual(values = c(21, 23)) +
       scico::scale_color_scico_d(
-        palette = "berlin", begin = 0.2, end = 0.8, direction = -1
+        palette = "berlin",
+        begin = 0.2,
+        end = 0.8,
+        direction = -1
       ) +
       ggplot2::theme_bw(base_size = 12) +
       ggplot2::theme(
@@ -170,7 +180,11 @@ temperature_timeseries <-
       ) +
       ggplot2::geom_jitter(
         mapping = ggplot2::aes(
-          x = year, y = difference, color = var, shape = var, fill = var
+          x = year,
+          y = difference,
+          color = var,
+          shape = var,
+          fill = var
         ),
         size = 2,
         width = 40
@@ -186,10 +200,16 @@ temperature_timeseries <-
       ggplot2::scale_x_date(date_breaks = "2 years", date_labels = "%Y") +
       ggplot2::scale_shape_manual(values = c(24, 25)) +
       scico::scale_color_scico_d(
-        palette = "berlin", begin = 0.2, end = 0.8, direction = -1
+        palette = "berlin",
+        begin = 0.2,
+        end = 0.8,
+        direction = -1
       ) +
       scico::scale_fill_scico_d(
-        palette = "berlin", begin = 0.2, end = 0.8, direction = -1
+        palette = "berlin",
+        begin = 0.2,
+        end = 0.8,
+        direction = -1
       ) +
       ggplot2::theme_bw(base_size = 12) +
       ggplot2::theme(
@@ -217,5 +237,6 @@ temperature_timeseries <-
     )
 
     return(validation_plot)
-
   }
+
+# -----------------------------------------------------------------------------
